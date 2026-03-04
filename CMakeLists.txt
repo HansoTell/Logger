@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28.3)
 
-project(Logger VERSION 1.0 LANGUAGES CXX)
+project(Result VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,7 +30,7 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 add_executable(LoggerTest tests/LoggerTest.cpp)
-target_link_libraries(LoggerTest PRIVATE LOGGER GTest::gtest_main)
+target_link_libraries(LoggerTest PRIVATE Logger GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(LoggerTest)
