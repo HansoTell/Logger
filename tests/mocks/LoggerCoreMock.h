@@ -7,8 +7,9 @@
 #define CREATE_MOCKLogger() Log::initLogger(std::make_unique<MOCKLoggerCore>())
 
 class MOCKLoggerCore : public Log::ILoggerCore {
+public:
     MOCK_METHOD(const std::string&, getLogPath, (), (const, override));
-    MOCK_METHOD(void, addToMessageQueue, (std::string&& logEntry), (override));
+    MOCK_METHOD(void, addToMessageQueue, (std::string&&), (override));
 };
 
 

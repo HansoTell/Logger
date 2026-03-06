@@ -15,10 +15,11 @@
 #include <system_error>
 #include <chrono>
 #include <filesystem>
+#include <type_traits>
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
-#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<LoggerThread>(file))
+#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<Log::LoggerThread>(file))
 #define DESTROY_LOGGER() Log::destroyLogger()
 
 #define SET_LOG_LEVEL(level) Log::pInstance->setLogLevel(level)
@@ -60,8 +61,7 @@
 
 #define MAXLOGSIZE 5*1024*1024
 
-//also trennen von thread logik und normaler logik
-//veänderung bon dem to log ding keine ahnung
+//schauen das toLog auch geht wenn methode nicht const ist
 namespace Log{
     template<typename T, typename = void>
     struct has_toLog : std::false_type {};
@@ -73,7 +73,7 @@ namespace Log{
     inline constexpr bool has_toLog_v = has_toLog<T>::value;
 
     template<typename T>
-    inline constexpr bool is_logable_v = std::is_arithmetic_v<T> || std::is_convertible_v<T, std::string> || has_toLog_v<T>;
+    inline constexpr bool is_logable_v = std::is_arithmetic_v<T> || std::is_constructible_v<std::string, T> || has_toLog_v<T>;
 
     enum LogLevel{
         DEBUG = 0, INFO, WARNING, ERROR, CRITICAL
@@ -309,7 +309,7 @@ namespace Log{
         template<typename T>
         auto appendToLog(std::string& Log, const T& message) -> decltype(message.toLog(), void()) { Log.append(message.toLog()); }
         template<typename T>
-        std::enable_if_t<std::is_convertible_v<T, std::string>, void>
+        std::enable_if_t<std::is_constructible_v<std::string, T>, void>
             appendToLog(std::string& Log, const T& message){ Log.append(std::string(message)); }
         template<typename T> 
         std::enable_if_t<!is_logable_v<T>, void>
