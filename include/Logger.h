@@ -18,7 +18,7 @@
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
-#define CREATE_LOGGER(file) Log::initLogger(file)
+#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<LoggerThread>(file))
 #define DESTROY_LOGGER() Log::destroyLogger()
 
 #define SET_LOG_LEVEL(level) Log::pInstance->setLogLevel(level)
@@ -87,8 +87,15 @@ namespace Log{
     };
 
     inline std::ostream& operator<<(std::ostream& os, const SourceLocation& location){ return os << location.File << ":" << location.line << " " << location.Function; }
+    
+    class ILoggerCore {
+    public:
+        virtual ~ILoggerCore() = default;
+        virtual const std::string& getLogPath() const = 0;
+        virtual void addToMessageQueue( std::string&& logEntry ) = 0;
+    };
 
-    class LoggerThread {
+    class LoggerThread : public ILoggerCore{
     public:
         LoggerThread(const std::string& file){
             m_logFile.open(file, std::ios::app);
@@ -107,9 +114,9 @@ namespace Log{
                 m_logFile.close();
         }
     public:
-        const std::string& getLogPath() const { return m_logPath; }
+        const std::string& getLogPath() const override { return m_logPath; }
 
-        void addToMessageQueue(std::string&& logEntry){
+        void addToMessageQueue(std::string&& logEntry) override{
             std::lock_guard<std::mutex> __lock (m_queueMutex);
             m_MessageQueue.push(std::move(logEntry));
             m_cv.notify_one();
@@ -218,7 +225,7 @@ namespace Log{
 
     class Logger{
         public:
-        Logger(const std::string& file) : m_LogThread(std::make_unique<LoggerThread>(file)){}
+        Logger(std::unique_ptr<ILoggerCore> core) : m_LogThread(std::move(core)){}
         ~Logger(){
             m_LogThread.reset(nullptr);
         }
@@ -309,16 +316,16 @@ namespace Log{
         appendToLog(std::string& Log, const T&  message) = delete;
 
         private:
-        std::unique_ptr<LoggerThread> m_LogThread;
+        std::unique_ptr<ILoggerCore> m_LogThread;
         LogLevel m_Loglevel = LogLevel::INFO;
     };
 
     
     inline Logger* pInstance = nullptr; 
 
-    inline void initLogger(const std::string& file){
+    inline void initLogger(std::unique_ptr<ILoggerCore> core){
         if( !pInstance )
-            pInstance = new Logger(file); 
+            pInstance = new Logger(std::move(core)); 
     }
 
     inline void destroyLogger() {
