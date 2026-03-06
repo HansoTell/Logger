@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -87,17 +88,16 @@ namespace Log{
 
     inline std::ostream& operator<<(std::ostream& os, const SourceLocation& location){ return os << location.File << ":" << location.line << " " << location.Function; }
 
-    class Logger{
-        public:
-        Logger(const std::string& file) : m_logPath(file){
-
+    class LoggerThread {
+    public:
+        LoggerThread(const std::string& file){
             m_logFile.open(file, std::ios::app);
             if(!m_logFile.is_open())
                 std::cerr << "Failed to open Log file" << "\n";
 
             m_LogThread = std::thread ( [this](){ this->logThread(); } );
         }
-        ~Logger(){
+        ~LoggerThread(){
             m_running = false;
             m_cv.notify_all();
             if( m_LogThread.joinable() )
@@ -106,61 +106,16 @@ namespace Log{
             if(m_logFile.is_open())
                 m_logFile.close();
         }
-        public:
-        void setLogLevel(LogLevel level){ m_Loglevel = level; }
-
+    public:
         const std::string& getLogPath() const { return m_logPath; }
-        LogLevel getLogLevel() const { return m_Loglevel; }
 
-        template<typename ... Args> 
-        void var_Log(LogLevel logLevel, SourceLocation location, Args&&... args){
-            if( logLevel < m_Loglevel )
-                return;
-
-            char buff[32];            
-            currentTimetoString(buff);
-
-            std::string logEntry = createDeafultEntry(buff, logLevel, location);
-
-            (addMessageToString(logEntry, std::forward<Args>(args)), ...);
-
-            logEntry.append("\n");
-            logEntry.shrink_to_fit();
-
-            addToMessageQueue(std::move(logEntry));
-
+        void addToMessageQueue(std::string&& logEntry){
+            std::lock_guard<std::mutex> __lock (m_queueMutex);
+            m_MessageQueue.push(std::move(logEntry));
             m_cv.notify_one();
         }
 
-        void log(LogLevel logLevel, const std::string_view message, SourceLocation location) {
-            if(logLevel < m_Loglevel)
-                return;
-
-            char buff[32];
-            currentTimetoString(buff);
-
-            std::string logEntry = createDeafultEntry(buff, logLevel, location);
-            logEntry.append(message.data()).append("\n");
-            logEntry.shrink_to_fit();
-
-
-            addToMessageQueue(std::move(logEntry));
-
-            m_cv.notify_one();
-        }
-
-        private:
-        std::string levelToString(LogLevel logLevel) const {
-            switch ( logLevel ){
-                case DEBUG: return "DEBUG"; 
-                case INFO: return "INFO";
-                case ERROR: return "ERROR";
-                case WARNING: return "WARNING";
-                case CRITICAL: return "CRITICAL";
-                default: return "NON TYPE";
-            }
-        }
-
+    private:
         void logThread(){
             size_t logFileSize = std::filesystem::file_size(m_logPath);
 
@@ -188,34 +143,8 @@ namespace Log{
             m_logFile.flush();
         }
 
-        void currentTimetoString(char* dest){
-            std::time_t logTime = std::time(nullptr);
-            std::strncpy(dest, std::ctime(&logTime), 24);
-            dest[24] = '\0';
-        }
-
-        std::string createDeafultEntry(const char* time, LogLevel logLevel, const SourceLocation& location){
-            std::string logEntry;
-            logEntry.reserve(256);
-            logEntry.append("[").append(time).append("] ")
-                    .append(levelToString(logLevel))
-                    .append(": [").append(location.File).append(":").append(std::to_string(location.line)).append(" ").append(location.Function).append("]");
-            return logEntry;
-        }
-
-        template<typename T>
-        void addMessageToString(std::string& string, T&& message){ 
-            appendToLog(string, message);
-            string.append(" ");
-        }
-
-
-        void addToMessageQueue(std::string&& logEntry){
-            std::lock_guard<std::mutex> __lock (m_queueMutex);
-            m_MessageQueue.push(std::move(logEntry));
-        }
-
         bool changeLogFileIfNeeded(){
+
             if( !std::filesystem::exists(m_logPath) )
                 return false;
 
@@ -267,13 +196,102 @@ namespace Log{
                 std::cerr << "Couldt open new Log File after rotating" << "\n";
 
             if( ec ){
-                VERROR("Failed to Rename File", ec.message());
+                std::cerr << "Failed to Rename File: " << ec.message() << "\n";
                 
                 return false;
             }
 
             return true;
         } 
+
+    private:
+        std::ofstream m_logFile;
+        std::string m_logPath;
+
+        std::mutex m_queueMutex;
+        std::queue<std::string> m_MessageQueue;
+        std::condition_variable m_cv;
+        std::thread m_LogThread;
+        std::atomic<bool> m_running {true};
+
+    };
+
+    class Logger{
+        public:
+        Logger(const std::string& file) : m_LogThread(std::make_unique<LoggerThread>(file)){}
+        ~Logger(){
+            m_LogThread.reset(nullptr);
+        }
+        public:
+        void setLogLevel(LogLevel level){ m_Loglevel = level; }
+
+        const std::string& getLogPath() const { return m_LogThread->getLogPath(); }
+        LogLevel getLogLevel() const { return m_Loglevel; }
+
+        template<typename ... Args> 
+        void var_Log(LogLevel logLevel, SourceLocation location, Args&&... args){
+            if( logLevel < m_Loglevel )
+                return;
+
+            char buff[32];            
+            currentTimetoString(buff);
+
+            std::string logEntry = createDeafultEntry(buff, logLevel, location);
+
+            (addMessageToString(logEntry, std::forward<Args>(args)), ...);
+
+            logEntry.append("\n");
+            logEntry.shrink_to_fit();
+
+            m_LogThread->addToMessageQueue(std::move(logEntry));
+        }
+
+        void log(LogLevel logLevel, const std::string_view message, SourceLocation location) {
+            if(logLevel < m_Loglevel)
+                return;
+
+            char buff[32];
+            currentTimetoString(buff);
+
+            std::string logEntry = createDeafultEntry(buff, logLevel, location);
+            logEntry.append(message.data()).append("\n");
+            logEntry.shrink_to_fit();
+
+            m_LogThread->addToMessageQueue(std::move(logEntry));
+        }
+
+        private:
+        std::string levelToString(LogLevel logLevel) const {
+            switch ( logLevel ){
+                case DEBUG: return "DEBUG"; 
+                case INFO: return "INFO";
+                case ERROR: return "ERROR";
+                case WARNING: return "WARNING";
+                case CRITICAL: return "CRITICAL";
+                default: return "NON TYPE";
+            }
+        }
+
+        void currentTimetoString(char* dest){
+            std::time_t logTime = std::time(nullptr);
+            std::strncpy(dest, std::ctime(&logTime), 24);
+            dest[24] = '\0';
+        }
+
+        std::string createDeafultEntry(const char* time, LogLevel logLevel, const SourceLocation& location){
+            std::string logEntry;
+            logEntry.reserve(256);
+            logEntry.append("[").append(time).append("] ")
+                    .append(levelToString(logLevel))
+                    .append(": [").append(location.File).append(":").append(std::to_string(location.line)).append(" ").append(location.Function).append("]");
+            return logEntry;
+        }
+
+        template<typename T>
+        void addMessageToString(std::string& string, T&& message){ 
+            appendToLog(string, message);
+            string.append(" ");
+        }
 
         void appendToLog(std::string& Log, const char* message){ Log.append(message); }
         void appendToLog(std::string& Log, std::string_view message) { Log.append(message); }
@@ -291,39 +309,10 @@ namespace Log{
         appendToLog(std::string& Log, const T&  message) = delete;
 
         private:
-        std::ofstream m_logFile;
-        std::string m_logPath;
+        std::unique_ptr<LoggerThread> m_LogThread;
         LogLevel m_Loglevel = LogLevel::INFO;
-
-        std::mutex m_queueMutex;
-        std::queue<std::string> m_MessageQueue;
-        std::condition_variable m_cv;
-        std::thread m_LogThread;
-        std::atomic<bool> m_running {true};
     };
 
-    class LoggerThread {
-    public:
-        LoggerThread(){
-
-        }
-        ~LoggerThread(){
-
-        }
-    public:
-        void addToMessageQueue(std::string&& logEntry){
-            std::lock_guard<std::mutex> __lock (m_queueMutex);
-            m_MessageQueue.push(std::move(logEntry));
-        }
-
-    private:
-        std::mutex m_queueMutex;
-        std::queue<std::string> m_MessageQueue;
-        std::condition_variable m_cv;
-        std::thread m_LogThread;
-        std::atomic<bool> m_running {true};
-
-    };
     
     inline Logger* pInstance = nullptr; 
 
