@@ -17,6 +17,30 @@
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
+#define CREATE_LOGGER(file) Log::initLogger(file)
+#define DESTROY_LOGGER() Log::destroyLogger()
+
+#define SET_LOG_LEVEL(level) Log::pInstance->setLogLevel(level)
+
+#ifndef NDEBUG
+#define LOG_DEBUG(msg) Log::pInstance->log(Log::LogLevel::DEBUG, msg, CURRENT_LOCATION_LOG)
+#define LOG_VDEBUG(...) Log::pInstance->var_Log(Log::LogLevel::DEBUG, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#else
+#define LOG_DEBUG(msg) 
+#define LOG_VDEBUG(...)
+#endif
+
+#define LOG_INFO(msg) Log::pInstance->log(Log::LogLevel::INFO, msg, CURRENT_LOCATION_LOG)
+#define LOG_VINFO(...) Log::pInstance->var_log(Log::LogLevel::INFO, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_WARNING(msg) Log::pInstance->log(Log::LogLevel::WARNING, msg, CURRENT_LOCATION_LOG)
+#define LOG_VWARNING(...) Log::pInstance->var_log(Log::LogLevel::WARNING, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_ERROR(msg) Log::pInstance->log(Log::LogLevel::ERROR, msg, CURRENT_LOCATION_LOG)
+#define LOG_VERROR(...) Log::pInstance->var_log(Log::LogLevel::VERROR, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_CRITICAL(msg) Log::pInstance->log(Log::LogLevel::CRITICAL, msg, CURRENT_LOCATION_LOG)
+#define LOG_VCRITICAL(...) Log::pInstance->var_log(Log::LogLevel::CRITICAL, CURRENT_LOCATION_LOG, __VA_ARGS__)
+
+
+
 #ifndef NDEBUG
 #define DEBUG(msg) log(Log::LogLevel::DEBUG, msg, CURRENT_LOCATION_LOG)
 #define VDEBUG(...) var_Log(Log::LogLevel::DEBUG, CURRENT_LOCATION_LOG, __VA_ARGS__)
@@ -24,7 +48,6 @@
 #define DEBUG(msg) 
 #define VDEBUG(...)
 #endif
-
 #define INFO(msg) log(Log::LogLevel::INFO, msg, CURRENT_LOCATION_LOG)
 #define VINFO(...) var_Log(Log::LogLevel::INFO, CURRENT_LOCATION_LOG, __VA_ARGS__)
 #define WARNING(msg) log(Log::LogLevel::WARNING, msg, CURRENT_LOCATION_LOG)
@@ -38,7 +61,6 @@
 
 //also trennen von thread logik und normaler logik
 //veänderung bon dem to log ding keine ahnung
-//und makros für logger instance und so wre cool
 namespace Log{
     template<typename T, typename = void>
     struct has_toLog : std::false_type {};
@@ -86,6 +108,9 @@ namespace Log{
         }
         public:
         void setLogLevel(LogLevel level){ m_Loglevel = level; }
+
+        const std::string& getLogPath() const { return m_logPath; }
+        LogLevel getLogLevel() const { return m_Loglevel; }
 
         template<typename ... Args> 
         void var_Log(LogLevel logLevel, SourceLocation location, Args&&... args){
@@ -276,4 +301,42 @@ namespace Log{
         std::thread m_LogThread;
         std::atomic<bool> m_running {true};
     };
+
+    class LoggerThread {
+    public:
+        LoggerThread(){
+
+        }
+        ~LoggerThread(){
+
+        }
+    public:
+        void addToMessageQueue(std::string&& logEntry){
+            std::lock_guard<std::mutex> __lock (m_queueMutex);
+            m_MessageQueue.push(std::move(logEntry));
+        }
+
+    private:
+        std::mutex m_queueMutex;
+        std::queue<std::string> m_MessageQueue;
+        std::condition_variable m_cv;
+        std::thread m_LogThread;
+        std::atomic<bool> m_running {true};
+
+    };
+    
+    inline Logger* pInstance = nullptr; 
+
+    inline void initLogger(const std::string& file){
+        if( !pInstance )
+            pInstance = new Logger(file); 
+    }
+
+    inline void destroyLogger() {
+        if( !pInstance ){
+            return;
+        }
+        delete pInstance; 
+        pInstance = nullptr; 
+    }
 }
