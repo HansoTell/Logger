@@ -124,30 +124,33 @@ namespace Log{
 
     private:
         void logThread(){
-            size_t logFileSize = std::filesystem::file_size(m_logPath);
-
             while( m_running || !m_MessageQueue.empty() ){
                 std::unique_lock<std::mutex> __lock (m_queueMutex);
                 m_cv.wait(__lock, [&]{
                     return !m_MessageQueue.empty() || !m_running;
                 });
 
-                while( !m_MessageQueue.empty() ){
-                    std::string& message = m_MessageQueue.front();
-
-                    if( logFileSize + message.size() > MAXLOGSIZE ){
-                        m_logFile.flush();
-                        if( changeLogFileIfNeeded() )
-                            logFileSize = 0;
-                    }
-
-                    logFileSize+=message.size();
-
-                    m_logFile << message;
-                    m_MessageQueue.pop();
-                }
+                printMessages();
             }
             m_logFile.flush();
+        }
+
+        void printMessages(){
+            size_t logFileSize = std::filesystem::file_size(m_logPath);
+            while( !m_MessageQueue.empty() ){
+                std::string& message = m_MessageQueue.front();
+
+                if( logFileSize + message.size() > MAXLOGSIZE ){
+                    m_logFile.flush();
+                    if( changeLogFileIfNeeded() )
+                        logFileSize = 0;
+                }
+
+                logFileSize+=message.size();
+
+                m_logFile << message;
+                m_MessageQueue.pop();
+            }
         }
 
         bool changeLogFileIfNeeded(){
@@ -158,30 +161,8 @@ namespace Log{
             if( m_logFile.is_open() )
                 m_logFile.close();
 
-            auto now = std::chrono::system_clock::now();
-            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-
-            char nsBuff[16];
-            std::snprintf(nsBuff, sizeof(nsBuff), "%ld", ns);
-
-            std::time_t currTime = std::chrono::system_clock::to_time_t(now);
-            char timeBuffer[std::size("yyyy-mm-ddThh:mm:ssZ")];
-            std::strftime(timeBuffer, std::size(timeBuffer), "%FT%TZ", std::gmtime(&currTime));
-            
-            const char* datFormat = ".log\0";
-            const char* LogPath_cstr = m_logPath.c_str();
-
-            const char* endOfDatName = strrchr(LogPath_cstr, '.');
-            endOfDatName++;
-            size_t nameSize = static_cast<size_t> (endOfDatName - LogPath_cstr);
-
-            char newLogName[nameSize + strlen(timeBuffer) + strlen(nsBuff) + strlen(datFormat) + 1]; 
-
-            std::strncpy(newLogName, LogPath_cstr, nameSize);
-            newLogName[nameSize] = '\0';
-            std::strcat(newLogName, timeBuffer);
-            std::strcat(newLogName, nsBuff);
-            std::strcat(newLogName, datFormat);
+            char newLogName[1024]; 
+            buildDatName(newLogName);
 
             std::string_view newLogName_c (newLogName);
 
@@ -210,6 +191,35 @@ namespace Log{
 
             return true;
         } 
+
+        void buildDatName(char* buf){
+            const char* datFormat = ".log\0";
+            const char* LogPath_cstr = m_logPath.c_str();
+
+            const char* endOfDatName = strrchr(LogPath_cstr, '.');
+            endOfDatName++;
+            size_t nameSize = static_cast<size_t> (endOfDatName - LogPath_cstr);
+
+            std::strncpy(buf, LogPath_cstr, nameSize);
+            buf[nameSize] = '\0';
+            concatTime(buf);
+            std::strcat(buf, datFormat);
+        }    
+
+        void concatTime(char* buf){
+            auto now = std::chrono::system_clock::now();
+            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
+            std::time_t currTime = std::chrono::system_clock::to_time_t(now);
+            char timeBuffer[std::size("yyyy-mm-ddThh:mm:ssZ")];
+            std::strftime(timeBuffer, std::size(timeBuffer), "%FT%TZ", std::gmtime(&currTime));
+
+            char nsBuff[16];
+            std::snprintf(nsBuff, sizeof(nsBuff), "%ld", ns);
+
+            std::strcat(buf, timeBuffer);
+            std::strcat(buf, nsBuff);
+        }
 
     private:
         std::ofstream m_logFile;
