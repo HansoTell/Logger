@@ -92,6 +92,7 @@ namespace Log{
     public:
         virtual ~IFileWriter() = default;
         virtual void writeFile( const std::string& logEntry ) = 0;
+        virtual void flush() = 0;
     };
 
     class AsyncFileWriter : public IFileWriter {
@@ -100,12 +101,14 @@ namespace Log{
         void writeFile( const std::string& logEntry ) override {
             size_t logFileSize = std::filesystem::file_size(m_logPath);
             if( logFileSize + logEntry.size() > MAXLOGSIZE ){
-                m_logFile.flush();
+                flush();
                 changeLogFileIfNeeded();
             }
 
             m_logFile << logEntry;
         }
+
+        void flush() override { m_logFile.flush(); }
         
     public:
         AsyncFileWriter( std::string file ) : m_logPath(std::move(file)){
@@ -116,10 +119,8 @@ namespace Log{
         AsyncFileWriter(const AsyncFileWriter& other) = delete;
         AsyncFileWriter(AsyncFileWriter&& other) = delete;
         ~AsyncFileWriter() {
-            if(m_logFile.is_open()){
-                m_logFile.flush();
+            if(m_logFile.is_open())
                 m_logFile.close();
-            }
         }
     private:
         bool changeLogFileIfNeeded() {
@@ -236,15 +237,19 @@ namespace Log{
 
                 writeMessages();
             }
+            m_FileWriter->flush();
         }
 
         void writeMessages(){
             while( !m_MessageQueue.empty() ){
-                std::string& message = m_MessageQueue.front();
-
-                m_FileWriter->writeFile(message);
-
+                std::string msg = std::move(m_MessageQueue.front());
                 m_MessageQueue.pop();
+
+                m_queueMutex.unlock();
+
+                m_FileWriter->writeFile(msg);
+
+                m_queueMutex.lock();
             }
         }
 

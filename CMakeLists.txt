@@ -29,7 +29,10 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(LoggerTest tests/LoggerTest.cpp)
+file(GLOB TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
+
+add_executable(LoggerTest ${TEST_SOURCES})
+
 target_include_directories(LoggerTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks)
 target_link_libraries(LoggerTest PRIVATE Logger GTest::gtest_main GTest::gmock)
 
