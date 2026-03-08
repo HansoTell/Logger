@@ -33,13 +33,13 @@
 #endif
 
 #define LOG_INFO(msg) Log::pInstance->log(Log::LogLevel::INFO, msg, CURRENT_LOCATION_LOG)
-#define LOG_VINFO(...) Log::pInstance->var_log(Log::LogLevel::INFO, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_VINFO(...) Log::pInstance->var_Log(Log::LogLevel::INFO, CURRENT_LOCATION_LOG, __VA_ARGS__)
 #define LOG_WARNING(msg) Log::pInstance->log(Log::LogLevel::WARNING, msg, CURRENT_LOCATION_LOG)
-#define LOG_VWARNING(...) Log::pInstance->var_log(Log::LogLevel::WARNING, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_VWARNING(...) Log::pInstance->var_Log(Log::LogLevel::WARNING, CURRENT_LOCATION_LOG, __VA_ARGS__)
 #define LOG_ERROR(msg) Log::pInstance->log(Log::LogLevel::ERROR, msg, CURRENT_LOCATION_LOG)
-#define LOG_VERROR(...) Log::pInstance->var_log(Log::LogLevel::VERROR, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_VERROR(...) Log::pInstance->var_Log(Log::LogLevel::ERROR, CURRENT_LOCATION_LOG, __VA_ARGS__)
 #define LOG_CRITICAL(msg) Log::pInstance->log(Log::LogLevel::CRITICAL, msg, CURRENT_LOCATION_LOG)
-#define LOG_VCRITICAL(...) Log::pInstance->var_log(Log::LogLevel::CRITICAL, CURRENT_LOCATION_LOG, __VA_ARGS__)
+#define LOG_VCRITICAL(...) Log::pInstance->var_Log(Log::LogLevel::CRITICAL, CURRENT_LOCATION_LOG, __VA_ARGS__)
 
 
 
@@ -61,7 +61,6 @@
 
 #define MAXLOGSIZE 5*1024*1024
 
-//schauen das toLog auch geht wenn methode nicht const ist
 namespace Log{
     template<typename T, typename = void>
     struct has_toLog : std::false_type {};
