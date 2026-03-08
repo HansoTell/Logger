@@ -58,13 +58,13 @@ TEST(LogLevel, setLogLevel){
 TEST_F(LoggerTest, LogUnderLoglevel){
     logger->setLogLevel(Log::LogLevel::ERROR);
 
-    EXPECT_CALL(*core, addToMessageQueue(_)).Times(0);
+    EXPECT_CALL(*core, write(_)).Times(0);
 
     logger->INFO("Test");
 }
 
 TEST_F(LoggerTest, LogSuccess){
-    EXPECT_CALL(*core, addToMessageQueue(AllOf(
+    EXPECT_CALL(*core, write(AllOf(
         HasSubstr("INFO"),
         HasSubstr("Test")
     ))).Times(1);
@@ -75,7 +75,7 @@ TEST_F(LoggerTest, LogSuccess){
 TEST_F(LoggerTest, VLogUnderLogLevel){
     logger->setLogLevel(Log::LogLevel::ERROR);
 
-    EXPECT_CALL(*core, addToMessageQueue(_)).Times(0);
+    EXPECT_CALL(*core, write(_)).Times(0);
 
     logger->VINFO("Test");
 }
@@ -94,7 +94,7 @@ struct strConvert {
 };
 
 TEST_F(LoggerTest, VLogSuccess){
-    EXPECT_CALL(*core, addToMessageQueue(AllOf(
+    EXPECT_CALL(*core, write(AllOf(
         HasSubstr("INFO"),
         HasSubstr("Test"),
         HasSubstr("string"),
@@ -113,7 +113,7 @@ TEST_F(LoggerTest, VLogSuccess){
 }
 
 TEST_F(LoggerTest, UseAfterVLog){
-    EXPECT_CALL(*core, addToMessageQueue(_)).Times(1);
+    EXPECT_CALL(*core, write(_)).Times(1);
 
     strConvert a;
 

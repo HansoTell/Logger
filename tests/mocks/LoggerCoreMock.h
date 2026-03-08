@@ -8,8 +8,7 @@
 
 class MOCKLoggerCore : public Log::ILoggerCore {
 public:
-    MOCK_METHOD(const std::string&, getLogPath, (), (const, override));
-    MOCK_METHOD(void, addToMessageQueue, (std::string&&), (override));
+    MOCK_METHOD(void, write, (std::string&&), (override));
 };
 
 

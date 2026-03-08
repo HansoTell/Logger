@@ -19,7 +19,7 @@
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
-#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<Log::LoggerThread>(file))
+#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<Log::AsyncLoggerCore>(std::make_unique<Log::AsyncFileWriter>(file)))
 #define DESTROY_LOGGER() Log::destroyLogger()
 
 #define SET_LOG_LEVEL(level) Log::pInstance->setLogLevel(level)
@@ -79,7 +79,6 @@ namespace Log{
         DEBUG = 0, INFO, WARNING, ERROR, CRITICAL
     };
 
-
     struct SourceLocation {
         const char* File;
         const char* Function;
@@ -88,72 +87,42 @@ namespace Log{
 
     inline std::ostream& operator<<(std::ostream& os, const SourceLocation& location){ return os << location.File << ":" << location.line << " " << location.Function; }
     
-    class ILoggerCore {
+
+    class IFileWriter {
     public:
-        virtual ~ILoggerCore() = default;
-        virtual const std::string& getLogPath() const = 0;
-        virtual void addToMessageQueue( std::string&& logEntry ) = 0;
+        virtual ~IFileWriter() = default;
+        virtual void writeFile( const std::string& logEntry ) = 0;
     };
 
-    class LoggerThread : public ILoggerCore{
+    class AsyncFileWriter : public IFileWriter {
     public:
-        LoggerThread(const std::string& file){
+    
+        void writeFile( const std::string& logEntry ) override {
+            size_t logFileSize = std::filesystem::file_size(m_logPath);
+            if( logFileSize + logEntry.size() > MAXLOGSIZE ){
+                m_logFile.flush();
+                changeLogFileIfNeeded();
+            }
+
+            m_logFile << logEntry;
+        }
+        
+    public:
+        AsyncFileWriter( std::string file ) : m_logPath(std::move(file)){
             m_logFile.open(file, std::ios::app);
             if(!m_logFile.is_open())
                 std::cerr << "Failed to open Log file" << "\n";
-
-            m_LogThread = std::thread ( [this](){ this->logThread(); } );
         }
-        ~LoggerThread(){
-            m_running = false;
-            m_cv.notify_all();
-            if( m_LogThread.joinable() )
-                m_LogThread.join();
-
-            if(m_logFile.is_open())
+        AsyncFileWriter(const AsyncFileWriter& other) = delete;
+        AsyncFileWriter(AsyncFileWriter&& other) = delete;
+        ~AsyncFileWriter() {
+            if(m_logFile.is_open()){
+                m_logFile.flush();
                 m_logFile.close();
+            }
         }
-    public:
-        const std::string& getLogPath() const override { return m_logPath; }
-
-        void addToMessageQueue(std::string&& logEntry) override{
-            std::lock_guard<std::mutex> __lock (m_queueMutex);
-            m_MessageQueue.push(std::move(logEntry));
-            m_cv.notify_one();
-        }
-
     private:
-        void logThread(){
-            while( m_running || !m_MessageQueue.empty() ){
-                std::unique_lock<std::mutex> __lock (m_queueMutex);
-                m_cv.wait(__lock, [&]{
-                    return !m_MessageQueue.empty() || !m_running;
-                });
-
-                printMessages();
-            }
-            m_logFile.flush();
-        }
-
-        void printMessages(){
-            size_t logFileSize = std::filesystem::file_size(m_logPath);
-            while( !m_MessageQueue.empty() ){
-                std::string& message = m_MessageQueue.front();
-
-                if( logFileSize + message.size() > MAXLOGSIZE ){
-                    m_logFile.flush();
-                    if( changeLogFileIfNeeded() )
-                        logFileSize = 0;
-                }
-
-                logFileSize+=message.size();
-
-                m_logFile << message;
-                m_MessageQueue.pop();
-            }
-        }
-
-        bool changeLogFileIfNeeded(){
+        bool changeLogFileIfNeeded() {
 
             if( !std::filesystem::exists(m_logPath) )
                 return false;
@@ -190,8 +159,8 @@ namespace Log{
             }
 
             return true;
-        } 
 
+        }
         void buildDatName(char* buf){
             const char* datFormat = ".log\0";
             const char* LogPath_cstr = m_logPath.c_str();
@@ -220,18 +189,77 @@ namespace Log{
             std::strcat(buf, timeBuffer);
             std::strcat(buf, nsBuff);
         }
+    private:
+        std::string m_logPath;
+        std::ofstream m_logFile;
+    };
+
+
+
+
+    class ILoggerCore {
+    public:
+        virtual ~ILoggerCore() = default;
+        virtual void write( std::string&& logEntry ) = 0;
+    };
+
+    class AsyncLoggerCore : public ILoggerCore{
+    public:
+        AsyncLoggerCore( std::unique_ptr<IFileWriter> fileWriter ) : m_FileWriter(std::move(fileWriter)){ start(); }
+        ~AsyncLoggerCore(){ 
+            stop(); 
+
+            m_FileWriter.reset(nullptr);
+        }
+    public:
+        void write(std::string&& logEntry) override{
+            std::lock_guard<std::mutex> __lock (m_queueMutex);
+            m_MessageQueue.push(std::move(logEntry));
+            m_cv.notify_one();
+        }
+
+        void start() { m_LogThread = std::thread ( [this](){ this->logThread(); } ); }
+        void stop() {
+            m_running = false;
+            m_cv.notify_all();
+            if( m_LogThread.joinable() )
+                m_LogThread.join();
+        }
 
     private:
-        std::ofstream m_logFile;
-        std::string m_logPath;
+        void logThread(){
+            while( m_running || !m_MessageQueue.empty() ){
+                std::unique_lock<std::mutex> __lock (m_queueMutex);
+                m_cv.wait(__lock, [&]{
+                    return !m_MessageQueue.empty() || !m_running;
+                });
+
+                writeMessages();
+            }
+        }
+
+        void writeMessages(){
+            while( !m_MessageQueue.empty() ){
+                std::string& message = m_MessageQueue.front();
+
+                m_FileWriter->writeFile(message);
+
+                m_MessageQueue.pop();
+            }
+        }
+
+    private:
+        std::unique_ptr<IFileWriter>m_FileWriter;
 
         std::mutex m_queueMutex;
         std::queue<std::string> m_MessageQueue;
         std::condition_variable m_cv;
         std::thread m_LogThread;
         std::atomic<bool> m_running {true};
-
     };
+
+
+
 
     class Logger{
         public:
@@ -242,7 +270,6 @@ namespace Log{
         public:
         void setLogLevel(LogLevel level){ m_Loglevel = level; }
 
-        const std::string& getLogPath() const { return m_LogThread->getLogPath(); }
         LogLevel getLogLevel() const { return m_Loglevel; }
 
         template<typename ... Args> 
@@ -260,7 +287,7 @@ namespace Log{
             logEntry.append("\n");
             logEntry.shrink_to_fit();
 
-            m_LogThread->addToMessageQueue(std::move(logEntry));
+            m_LogThread->write(std::move(logEntry));
         }
 
         void log(LogLevel logLevel, const std::string_view message, SourceLocation location) {
@@ -274,7 +301,7 @@ namespace Log{
             logEntry.append(message.data()).append("\n");
             logEntry.shrink_to_fit();
 
-            m_LogThread->addToMessageQueue(std::move(logEntry));
+            m_LogThread->write(std::move(logEntry));
         }
 
         private:
