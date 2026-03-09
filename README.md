@@ -17,7 +17,9 @@ Also at the moment there is no possiblitiy to Log the messages to console it can
 Possibility for multible loggers
 Sync Loggers
 Logging to console
-complete Tests
+> [!IMPORTANT]
+> complete Tests
+> Test for failing file opening + logs with failed file opening
 
 ### Disclaimer
 This project got started because during the development of the Project "HTTP-Sverver". For this reason not all commits will be present 
