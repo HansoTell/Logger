@@ -1,4 +1,6 @@
 #include "Logger.h"
+#include <fstream>
+#include <iostream>
 #include <string>
 
 enum ErrorCodes {
@@ -18,11 +20,12 @@ struct Error {
 
 
 int main(){
+    std::ofstream ostr;
 
     CREATE_LOGGER("Log/Example.log");
 
-    
-
 
     DESTROY_LOGGER();
+
+    return 0;
 }
