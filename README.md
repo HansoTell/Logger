@@ -20,6 +20,7 @@ Logging to console
 > [!IMPORTANT]
 > complete Tests
 > Test for failing file opening + logs with failed file opening
+> Creating directorys in given path
 
 ### Disclaimer
 This project got started because during the development of the Project "HTTP-Sverver". For this reason not all commits will be present 
