@@ -224,7 +224,10 @@ namespace Log{
 
         void start() { m_LogThread = std::thread ( [this](){ this->logThread(); } ); }
         void stop() {
-            m_running = false;
+            {
+                std::lock_guard<std::mutex> __lock (m_queueMutex);
+                m_running = false;
+            }
             m_cv.notify_all();
             if( m_LogThread.joinable() )
                 m_LogThread.join();
