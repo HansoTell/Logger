@@ -238,24 +238,19 @@ namespace Log{
                     return !m_MessageQueue.empty() || !m_running;
                 });
 
-                writeMessages();
+                while( !m_MessageQueue.empty() ){
+                    std::string msg = std::move(m_MessageQueue.front());
+                    m_MessageQueue.pop();
+
+                    __lock.unlock();
+
+                    m_FileWriter->writeFile(msg);
+
+                    __lock.lock();
+                }
             }
             m_FileWriter->flush();
         }
-
-        void writeMessages(){
-            while( !m_MessageQueue.empty() ){
-                std::string msg = std::move(m_MessageQueue.front());
-                m_MessageQueue.pop();
-
-                m_queueMutex.unlock();
-
-                m_FileWriter->writeFile(msg);
-
-                m_queueMutex.lock();
-            }
-        }
-
     private:
         std::unique_ptr<IFileWriter>m_FileWriter;
 
