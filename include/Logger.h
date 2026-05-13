@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -65,6 +66,7 @@
 
 using HLogger = uint64_t;
 
+//Ig müssen dependencys umdrehen s.d es logthread modul hat, dass die ganze logger hält und dann var log/log bei denen aufruft
 namespace Log{
     template<typename T, typename = void>
     struct has_toLog : std::false_type {};
@@ -203,8 +205,6 @@ namespace Log{
     };
 
 
-
-
     class ILoggerCore {
     public:
         virtual ~ILoggerCore() = default;
@@ -268,6 +268,11 @@ namespace Log{
         std::atomic<bool> m_running {true};
     };
 
+    struct LoggerInfo 
+    {
+        std::unique_ptr<ILoggerCore> Core;
+        LogLevel LogLevel;
+    };
 
 
     class Logger{
@@ -278,8 +283,22 @@ namespace Log{
         }
         public:
         void setLogLevel(LogLevel level){ m_Loglevel = level; }
-
         LogLevel getLogLevel() const { return m_Loglevel; }
+
+        HLogger CreateLogger( std::unique_ptr<ILoggerCore>Core, LogLevel Loglevel )
+        {
+            LoggerInfo info { std::move( Core ), Loglevel };
+
+            assert(m_CoreMap.find(Next_ID) == m_CoreMap.end());
+            HLogger id = Next_ID;
+            
+            m_CoreMap.emplace(id, std::move(info));
+            Next_ID++;
+
+            return id;
+        }
+        HLogger CreateLogger( std::unique_ptr<ILoggerCore>Core ) { return CreateLogger(std::move(Core), LogLevel::INFO); }
+        HLogger CreateLogger( std::string file ) { return CreateLogger(std::make_unique<Log::AsyncLoggerCore>(std::make_unique<Log::AsyncFileWriter>(std::move(file))),  LogLevel::INFO); }
 
         template<typename ... Args> 
         void var_Log(LogLevel logLevel, SourceLocation location, Args&&... args){
@@ -367,12 +386,12 @@ namespace Log{
 
         //new
         HLogger Next_ID;
-        std::unordered_map<HLogger, std::unique_ptr<ILoggerCore>> m_CoreMap;
-
+        std::unordered_map<HLogger, LoggerInfo> m_CoreMap;
     };
 
     
     inline Logger* pInstance = nullptr; 
+    inline HLogger HInsance;
 
     inline void initLogger(std::unique_ptr<ILoggerCore> core){
         if( !pInstance )
