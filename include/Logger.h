@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cassert>
+#include <charconv>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <iostream>
@@ -16,10 +19,11 @@
 #include <chrono>
 #include <filesystem>
 #include <type_traits>
+#include <unordered_map>
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
-#define CREATE_LOGGER(file) Log::initLogger(std::make_unique<Log::AsyncLoggerCore>(std::make_unique<Log::AsyncFileWriter>(file)))
+#define CREATE_LOGGER(file) Log::initLogger(std::make_shared<Log::AsyncLoggerCore>(file))
 #define DESTROY_LOGGER() Log::destroyLogger()
 
 #define SET_LOG_LEVEL(level) Log::pInstance->setLogLevel(level)
@@ -59,6 +63,8 @@
 #define CRITICAL(msg) log(Log::LogLevel::CRITICAL, msg, CURRENT_LOCATION_LOG)
 #define VCRITICAL(...) var_Log(Log::LogLevel::CRITICAL, CURRENT_LOCATION_LOG, __VA_ARGS__)
 
+#define CREATE_FILEWRITER(FilePath) std::make_unique<Log::FileWriter>(FilePath)
+
 #define MAXLOGSIZE 5*1024*1024
 
 namespace Log{
@@ -94,16 +100,17 @@ namespace Log{
         virtual void flush() = 0;
     };
 
-    class AsyncFileWriter : public IFileWriter {
+    class FileWriter : public IFileWriter {
     public:
     
         void writeFile( const std::string& logEntry ) override {
-            size_t logFileSize = std::filesystem::file_size(m_logPath);
-            if( logFileSize + logEntry.size() > MAXLOGSIZE ){
+            if( m_FileSize + logEntry.size() > MAXLOGSIZE ){
+                m_FileSize = 0;
                 flush();
                 changeLogFileIfNeeded();
             }
 
+            m_FileSize += logEntry.size();
             m_logFile << logEntry;
         }
 
@@ -113,15 +120,17 @@ namespace Log{
         bool isOpen() const { return m_logFile.is_open(); }
         
     public:
-        AsyncFileWriter( std::string file ) : m_logPath(std::move(file)){
+        FileWriter( std::string file ) : m_logPath(std::move(file)){
 
             m_logFile.open(m_logPath, std::ios::app);
             if(!m_logFile.is_open())
                 std::cerr << "Failed to open Log file" << "\n";
+            else
+                m_FileSize= std::filesystem::file_size(m_logPath);
         }
-        AsyncFileWriter(const AsyncFileWriter& other) = delete;
-        AsyncFileWriter(AsyncFileWriter&& other) = delete;
-        ~AsyncFileWriter() {
+        FileWriter(const FileWriter& other) = delete;
+        FileWriter(FileWriter&& other) = delete;
+        ~FileWriter() {
             if(m_logFile.is_open())
                 m_logFile.close();
         }
@@ -196,9 +205,8 @@ namespace Log{
     private:
         std::string m_logPath;
         std::ofstream m_logFile;
+        size_t m_FileSize;
     };
-
-
 
 
     class ILoggerCore {
@@ -210,6 +218,7 @@ namespace Log{
     class AsyncLoggerCore : public ILoggerCore{
     public:
         AsyncLoggerCore( std::unique_ptr<IFileWriter> fileWriter ) : m_FileWriter(std::move(fileWriter)){ start(); }
+        AsyncLoggerCore( std::string file ) : m_FileWriter(CREATE_FILEWRITER(std::move(file))) { start(); }
         ~AsyncLoggerCore(){ 
             stop(); 
 
@@ -264,18 +273,12 @@ namespace Log{
         std::atomic<bool> m_running {true};
     };
 
-
-
-
     class Logger{
         public:
-        Logger(std::unique_ptr<ILoggerCore> core) : m_LogThread(std::move(core)){}
-        ~Logger(){
-            m_LogThread.reset(nullptr);
-        }
+        Logger(std::shared_ptr<ILoggerCore> core) : m_LogThread(core){}
+        ~Logger() = default;
         public:
         void setLogLevel(LogLevel level){ m_Loglevel = level; }
-
         LogLevel getLogLevel() const { return m_Loglevel; }
 
         template<typename ... Args> 
@@ -291,7 +294,6 @@ namespace Log{
             (addMessageToString(logEntry, std::forward<Args>(args)), ...);
 
             logEntry.append("\n");
-            logEntry.shrink_to_fit();
 
             m_LogThread->write(std::move(logEntry));
         }
@@ -305,7 +307,6 @@ namespace Log{
 
             std::string logEntry = createDeafultEntry(buff, logLevel, location);
             logEntry.append(message.data()).append("\n");
-            logEntry.shrink_to_fit();
 
             m_LogThread->write(std::move(logEntry));
         }
@@ -324,13 +325,15 @@ namespace Log{
 
         void currentTimetoString(char* dest){
             std::time_t logTime = std::time(nullptr);
-            std::strncpy(dest, std::ctime(&logTime), 24);
-            dest[24] = '\0';
+            std::tm tm{};
+            localtime_r(&logTime, &tm);
+
+            std::strftime(dest, sizeof(dest), "%F %T", &tm);
         }
 
         std::string createDeafultEntry(const char* time, LogLevel logLevel, const SourceLocation& location){
             std::string logEntry;
-            logEntry.reserve(256);
+            logEntry.reserve(512);
             logEntry.append("[").append(time).append("] ")
                     .append(levelToString(logLevel))
                     .append(": [").append(location.File).append(":").append(std::to_string(location.line)).append(" ").append(location.Function).append("]");
@@ -348,7 +351,12 @@ namespace Log{
         void appendToLog(std::string& Log, const std::string& message) {Log.append(message); }
         template<typename T>
         std::enable_if_t<std::is_arithmetic_v<T>, void> 
-            appendToLog(std::string& Log, const T& message){ Log.append(std::to_string(message)); }
+            appendToLog(std::string& Log, const T& message)
+        { 
+            char buffer[64];
+            auto[end, ec] = std::to_chars(buffer, buffer + sizeof(buffer), message);
+            Log.append(buffer, end); 
+        }
         template<typename T>
         auto appendToLog(std::string& Log, const T& message) -> decltype(message.toLog(), void()) { Log.append(message.toLog()); }
         template<typename T>
@@ -359,16 +367,16 @@ namespace Log{
         appendToLog(std::string& Log, const T&  message) = delete;
 
         private:
-        std::unique_ptr<ILoggerCore> m_LogThread;
+        std::shared_ptr<ILoggerCore> m_LogThread;
         LogLevel m_Loglevel = LogLevel::INFO;
     };
 
     
     inline Logger* pInstance = nullptr; 
 
-    inline void initLogger(std::unique_ptr<ILoggerCore> core){
+    inline void initLogger(std::shared_ptr<ILoggerCore> core){
         if( !pInstance )
-            pInstance = new Logger(std::move(core)); 
+            pInstance = new Logger(core); 
     }
 
     inline void destroyLogger() {
