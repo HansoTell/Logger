@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include <chrono>
 #include <filesystem>
 #include <type_traits>
+#include <unordered_map>
 
 #define CURRENT_LOCATION_LOG ::Log::SourceLocation{__FILE__, __func__, __LINE__}
 
@@ -60,6 +62,8 @@
 #define VCRITICAL(...) var_Log(Log::LogLevel::CRITICAL, CURRENT_LOCATION_LOG, __VA_ARGS__)
 
 #define MAXLOGSIZE 5*1024*1024
+
+using HLogger = uint64_t;
 
 namespace Log{
     template<typename T, typename = void>
@@ -266,7 +270,6 @@ namespace Log{
 
 
 
-
     class Logger{
         public:
         Logger(std::unique_ptr<ILoggerCore> core) : m_LogThread(std::move(core)){}
@@ -361,6 +364,11 @@ namespace Log{
         private:
         std::unique_ptr<ILoggerCore> m_LogThread;
         LogLevel m_Loglevel = LogLevel::INFO;
+
+        //new
+        HLogger Next_ID;
+        std::unordered_map<HLogger, std::unique_ptr<ILoggerCore>> m_CoreMap;
+
     };
 
     
